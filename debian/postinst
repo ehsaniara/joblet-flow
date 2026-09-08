@@ -1,0 +1,18 @@
+#!/bin/bash
+set -e
+
+case "$1" in
+    configure)
+        systemctl daemon-reload
+        systemctl enable joblet-flow.service >/dev/null 2>&1 || true
+        systemctl restart joblet-flow.service
+
+        echo ""
+        echo "✅ joblet-flow installed"
+        echo "   Engine:  127.0.0.1:50055 (FlowService, loopback only)"
+        echo "   Status:  systemctl status joblet-flow"
+        echo "   Logs:    journalctl -u joblet-flow -f"
+        ;;
+esac
+
+exit 0

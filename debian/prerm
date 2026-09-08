@@ -1,0 +1,7 @@
+#!/bin/bash
+set -e
+
+systemctl stop joblet-flow.service 2>/dev/null || true
+systemctl disable joblet-flow.service 2>/dev/null || true
+
+exit 0

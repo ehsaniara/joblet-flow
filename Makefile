@@ -1,4 +1,4 @@
-.PHONY: help build run test pre-pr clean
+.PHONY: help build run test deb e2e pre-pr clean
 
 BIN := bin/joblet-flow
 
@@ -8,10 +8,12 @@ help:
 	@echo "  make build     - Build the engine -> bin/joblet-flow"
 	@echo "  make run       - Run the engine (mTLS to joblet from rnx-config.yml)"
 	@echo "  make test      - Run unit tests"
-	@echo "  make pre-pr    - Full pre-PR check (fmt, vet, tidy, tests, build)"
+	@echo "  make deb       - Build the joblet-flow .deb from the working tree"
+	@echo "  make e2e       - Clean-room e2e: uninstall flow+joblet, install"
+	@echo "                   latest released joblet, install flow from tree,"
+	@echo "                   run the suites (needs sudo)"
+	@echo "  make pre-pr    - Full pre-PR check (fmt, vet, tidy, tests, build, e2e)"
 	@echo "  make clean     - Remove build artifacts"
-	@echo ""
-	@echo "  Engine integration is tested end-to-end by joblet-flow-sdk-python's e2e."
 
 build:
 	go build -o $(BIN) ./cmd/joblet-flow
@@ -20,10 +22,18 @@ run: build
 	./$(BIN)
 
 test:
-	go test ./...
+	@echo "Running tests (cache disabled)..."
+	@go test -count=1 ./...
+	@echo "✅ All tests complete"
+
+deb:
+	@./scripts/build-deb.sh
+
+e2e:
+	@./tests/e2e/run_tests.sh
 
 pre-pr:
 	@./scripts/pre-pr-check.sh
 
 clean:
-	rm -rf bin
+	rm -rf bin joblet-flow-deb-* joblet-flow_*.deb

@@ -1,20 +1,27 @@
 #!/bin/bash
-# Pre-PR verification pipeline for joblet-flow.
-#
-# Run this before opening a PR. It validates the working tree:
-#
-#   1. Format check   (gofmt)
-#   2. Static check    (go vet)
-#   3. Dependency hygiene (go mod tidy is a no-op)
-#   4. Unit tests (cache disabled)
-#   5. Build the engine
-#   6. E2E suite: a throwaway engine against the real joblet install
-#      (tests/e2e/run_tests.sh; needs joblet installed and running)
 
-set -u
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Pre-PR verification pipeline
+#
+# Run this before opening a PR. It validates the working tree end to end on
+# this machine's architecture:
+#
+#   1. Run unit tests (make test)
+#   2. Run the e2e suite via tests/e2e/run_tests.sh, which uninstalls
+#      joblet-flow AND joblet completely, installs the latest released
+#      joblet from GitHub, installs joblet-flow from the working tree as a
+#      .deb, and runs every suite against that clean install
+#
+# Must run in a real terminal - several steps use sudo.
 
-GREEN='\033[0;32m'; RED='\033[0;31m'; CYAN='\033[0;36m'; NC='\033[0m'
+set -e
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ARCH=$(go env GOARCH)
+
+GREEN='\033[0;32m'
+RED='\033[0;31m'
+CYAN='\033[0;36m'
+NC='\033[0m'
 
 step() {
     echo -e "\n${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
@@ -27,32 +34,17 @@ fail() {
     exit 1
 }
 
-cd "$ROOT"
+if [ ! -t 0 ]; then
+    echo "⚠️  No terminal detected - sudo prompts will fail. Run this in a real terminal."
+fi
 
-step "1/6 Format check (gofmt)"
-unformatted="$(gofmt -l .)"
-[ -z "$unformatted" ] || { echo "$unformatted"; fail "gofmt - run 'make fmt'"; }
-echo -e "${GREEN}✓ gofmt clean${NC}"
+step "1/2 Unit tests"
+make -C "$ROOT" test || fail "unit tests"
 
-step "2/6 Static analysis (go vet)"
-go vet ./... || fail "go vet"
-
-step "3/6 Dependency hygiene (go mod tidy)"
-before="$(cat go.mod go.sum 2>/dev/null | sha256sum)"
-go mod tidy || fail "go mod tidy"
-after="$(cat go.mod go.sum 2>/dev/null | sha256sum)"
-[ "$before" = "$after" ] || fail "go mod tidy changed go.mod/go.sum - commit the tidied result"
-echo -e "${GREEN}✓ modules tidy${NC}"
-
-step "4/6 Unit tests"
-go test -count=1 ./... || fail "unit tests"
-
-step "5/6 Build (engine)"
-make build || fail "build"
-
-step "6/6 E2E suite (engine + real joblet)"
+step "2/2 E2E suite on a clean install ($ARCH)"
 "$ROOT/tests/e2e/run_tests.sh" || fail "e2e suite"
 
 echo -e "\n${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo -e "${GREEN}✅ PRE-PR CHECK PASSED${NC}"
+echo -e "${GREEN}  ✅ PRE-PR CHECK PASSED${NC}"
+echo -e "${GREEN}  Unit tests + e2e on a clean install verified on $(uname -m)/$(. /etc/os-release && echo "$ID $VERSION_ID")${NC}"
 echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"

@@ -1,0 +1,10 @@
+Package: joblet-flow
+Version: VERSION_PLACEHOLDER
+Section: admin
+Priority: optional
+Architecture: ARCH_PLACEHOLDER
+Maintainer: Jay Ehsaniara <ehsaniara@gmail.com>
+Description: Joblet Flow Engine - durable workflow orchestrator
+ Orchestrates workflows whose activities run as isolated joblet jobs.
+ Requires a joblet install on the same host; connects to it over mTLS
+ using the joblet install's client configuration.

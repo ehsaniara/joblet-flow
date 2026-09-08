@@ -1,0 +1,19 @@
+[Unit]
+Description=Joblet Flow Engine - durable workflow orchestrator
+Documentation=https://github.com/ehsaniara/joblet-flow
+After=network.target joblet.service
+Wants=joblet.service
+
+[Service]
+Type=simple
+ExecStart=/opt/joblet-flow/bin/joblet-flow
+# FlowService has no authentication yet: listen on loopback only
+Environment=FLOW_LISTEN_ADDR=127.0.0.1:50055
+# mTLS credentials come from the joblet install on this host
+Environment=JOBLET_CONFIG=/opt/joblet/config/rnx-config.yml
+User=root
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,12 @@
+#!/bin/bash
+set -e
+
+case "$1" in
+    purge)
+        rm -rf /opt/joblet-flow
+        ;;
+esac
+
+systemctl daemon-reload 2>/dev/null || true
+
+exit 0

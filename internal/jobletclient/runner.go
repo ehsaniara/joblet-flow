@@ -107,7 +107,8 @@ func (r *Runner) captureLogs(ctx context.Context, uuid string) (string, error) {
 	return buf.String(), nil
 }
 
-// specToRunJob maps a FlowJobSpec onto a joblet RunJobRequest (Node not yet honored).
+// specToRunJob maps a FlowJobSpec onto a joblet RunJobRequest; the spec's
+// Node field is ignored.
 func specToRunJob(spec *flowpb.FlowJobSpec) *pb.RunJobRequest {
 	req := &pb.RunJobRequest{
 		Runtime:     spec.GetRuntime(),
