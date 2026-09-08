@@ -1,3 +1,5 @@
+github.com/ehsaniara/joblet-proto/v2 v2.6.0 h1:+6Wgg3iDE+fGpKW9/6gxXXhzUl3mX8jOK1A+NSEGXVc=
+github.com/ehsaniara/joblet-proto/v2 v2.6.0/go.mod h1:Ie5fkoH5PkhxSHDJvTu+exdqUnUSWK8KjpENb+K5TVY=
 github.com/google/go-cmp v0.6.0 h1:ofyhxvXcZhMsU5ulbFiLKl/XBFqE1GSq7atu8tAmTRI=
 github.com/google/go-cmp v0.6.0/go.mod h1:17dUlkBOakJ0+DkrSSNjCkIjxS6bF9zb3elmeNGIjoY=
 golang.org/x/net v0.23.0 h1:7EYJ93RZ9vYSZAIb2x3lnuvqO5zneoD6IvWjuhfxjTs=

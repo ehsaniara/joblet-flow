@@ -1,4 +1,4 @@
-.PHONY: help build run test deb e2e pre-pr clean
+.PHONY: help build run test deb rpm e2e pre-pr clean
 
 BIN := bin/joblet-flow
 
@@ -9,6 +9,7 @@ help:
 	@echo "  make run       - Run the engine (mTLS to joblet from rnx-config.yml)"
 	@echo "  make test      - Run unit tests"
 	@echo "  make deb       - Build the joblet-flow .deb from the working tree"
+	@echo "  make rpm       - Build the joblet-flow .rpm (needs rpmbuild)"
 	@echo "  make e2e       - Clean-room e2e: uninstall flow+joblet, install"
 	@echo "                   latest released joblet, install flow from tree,"
 	@echo "                   run the suites (needs sudo)"
@@ -29,6 +30,9 @@ test:
 deb:
 	@./scripts/build-deb.sh
 
+rpm:
+	@./scripts/build-rpm.sh
+
 e2e:
 	@./tests/e2e/run_tests.sh
 
@@ -36,4 +40,4 @@ pre-pr:
 	@./scripts/pre-pr-check.sh
 
 clean:
-	rm -rf bin joblet-flow-deb-* joblet-flow_*.deb
+	rm -rf bin joblet-flow-deb-* rpmbuild joblet-flow_*.deb joblet-flow-*.rpm

@@ -13,6 +13,8 @@ scripts/get-joblet.sh     download the latest released joblet .deb
 scripts/joblet-flow.service  systemd unit (loopback listener)
 scripts/pre-pr-check.sh   pre-PR pipeline
 tests/e2e/                clean-room e2e suites and the test driver
+.github/workflows/        CI (vet, tests, lint, per-arch .deb builds) and
+                          the tag-triggered release
 ```
 
 ## Make targets

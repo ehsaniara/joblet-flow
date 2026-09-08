@@ -44,14 +44,14 @@ job**, so agent-invoked tools and LLM-generated code execute sandboxed
 
 ```mermaid
 flowchart LR
-  client[Client\nstart / get / signal]
+  client[Client<br/>start / get / signal]
   subgraph engine[joblet-flow engine  Go]
     rpc[FlowService gRPC]
-    store[(Store\nruns · queues · memo)]
+    store[(Store<br/>runs · queues · memo)]
     disp[Activity dispatcher]
   end
-  worker[SDK worker\npython / node / …]
-  joblet[joblet node\nJobService]
+  worker[SDK worker<br/>python / node / …]
+  joblet[joblet node<br/>JobService]
 
   client -->|gRPC| rpc
   worker <-->|PollTask / RunActivity / Complete| rpc
@@ -260,12 +260,8 @@ flowchart LR
   client[Client]
   worker[SDK worker]
   subgraph host[one host]
-    engine["joblet-flow engine
-    /opt/joblet-flow, systemd
-    127.0.0.1:50055"]
-    joblet["joblet node
-    /opt/joblet, systemd
-    JobService :50051"]
+    engine["joblet-flow engine<br/>/opt/joblet-flow, systemd<br/>127.0.0.1:50055"]
+    joblet["joblet node<br/>/opt/joblet, systemd<br/>JobService :50051"]
   end
   client -->|gRPC| engine
   worker <-->|PollTask / activities| engine
@@ -286,7 +282,7 @@ joblet-flow and joblet keep **separate homes** with a one-way shared surface:
 ```mermaid
 flowchart LR
   subgraph jh["/opt/joblet - joblet-owned, wiped by joblet purge"]
-    cfg["config/ - host trust domain\nrnx-config.yml, embedded certs"]
+    cfg["config/ - host trust domain<br/>rnx-config.yml, embedded certs"]
     jbin["bin/ - joblet, persist, state"]
   end
   subgraph fh["/opt/joblet-flow - flow-owned, survives joblet"]

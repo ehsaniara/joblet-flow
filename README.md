@@ -11,7 +11,7 @@ The gRPC contract is [`joblet-proto/proto/flow/flow.proto`](../joblet-proto/prot
 
 📖 **Docs:** [Architecture / system design](docs/ARCHITECTURE.md) ·
 [Protocol reference](docs/PROTOCOL.md) · [Configuration](docs/CONFIGURATION.md) ·
-[Development](docs/DEVELOPMENT.md)
+[Development](docs/DEVELOPMENT.md) · [Compatibility](COMPATIBILITY.md)
 
 ## What the engine does (and doesn't)
 
@@ -77,6 +77,7 @@ internal/jobletclient  activity job runner over joblet's JobService
 internal/config        environment configuration
 debian/, scripts/      .deb packaging, systemd unit, e2e helpers
 tests/e2e              clean-room e2e suite and its test driver
+.github/workflows      CI and the tag-triggered release
 ```
 
 ## Install
@@ -91,6 +92,9 @@ only (`127.0.0.1:50055`), since `FlowService` itself has no authentication.
 sudo dpkg -i joblet-flow_*.deb    # installs, enables, and starts the service
 systemctl status joblet-flow
 ```
+
+RPM packages (`./scripts/build-rpm.sh`, needs `rpmbuild`) are built for both
+architectures too; releases publish `.deb` and `.rpm` for amd64 and arm64.
 
 The package declares no dpkg dependency on joblet: joblet installs, runs, and
 uninstalls without regard to joblet-flow. With joblet absent, the flow service

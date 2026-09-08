@@ -10,6 +10,8 @@
   adding a durable store.
 - **[RNX_FLOW_CLI](RNX_FLOW_CLI.md)** - design for the `rnx flow` command group
   (to implement in joblet-rnx, where rnx lives).
+- **[COMPATIBILITY](../COMPATIBILITY.md)** - proto and joblet version
+  compatibility.
 
 New here? Start with the [top-level README](../README.md) for the overview and
 quick start, then read [ARCHITECTURE](ARCHITECTURE.md).

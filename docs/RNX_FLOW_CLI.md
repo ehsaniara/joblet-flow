@@ -32,9 +32,9 @@ nodes:
   admin:
     isDefault: true  # used when no node name is specified
     address: "10.0.0.10:50051"   # joblet JobService (existing)
-    flow: "10.0.0.10:50055"   # joblet-flow FlowService (new, optional;
-      # remote reach requires FlowService mTLS,
-    # which today listens on loopback only)
+    # flow is new and optional; remote reach requires FlowService mTLS,
+    # which today listens on loopback only
+    flow: "10.0.0.10:50055"
     cert: | ...
     key:  | ...
     ca:   | ...

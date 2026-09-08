@@ -1,0 +1,196 @@
+name: Release
+
+on:
+  push:
+    tags: [ 'v*.*.*' ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  GO_VERSION: '1.24'
+
+jobs:
+  build-deb:
+    name: Build .deb ${{ matrix.arch }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [ amd64, arm64 ]
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v4
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Get version from tag
+        id: version
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Build .deb (engine build + arch verification inside)
+        run: |
+          chmod +x scripts/build-deb.sh
+          ./scripts/build-deb.sh ${{ matrix.arch }} ${{ steps.version.outputs.version }}
+
+      - name: Inspect package
+        run: dpkg-deb --info joblet-flow_*_${{ matrix.arch }}.deb
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: joblet-flow-deb-${{ matrix.arch }}
+          path: joblet-flow_*_${{ matrix.arch }}.deb
+
+  build-rpm:
+    name: Build .rpm ${{ matrix.rpm_arch }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - arch: amd64
+            rpm_arch: x86_64
+          - arch: arm64
+            rpm_arch: aarch64
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v4
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Install rpmbuild
+        run: sudo apt-get update && sudo apt-get install -y rpm
+
+      - name: Get version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+
+      - name: Build .rpm (engine build + arch verification inside)
+        run: |
+          chmod +x scripts/build-rpm.sh
+          ./scripts/build-rpm.sh ${{ matrix.rpm_arch }} ${{ steps.version.outputs.version }}
+
+      - name: Inspect package
+        run: rpm -qip joblet-flow-*.${{ matrix.rpm_arch }}.rpm
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: joblet-flow-rpm-${{ matrix.rpm_arch }}
+          path: joblet-flow-*.${{ matrix.rpm_arch }}.rpm
+
+  test-packages:
+    name: Smoke-test packages
+    needs: [ build-deb, build-rpm ]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: packages
+          merge-multiple: true
+
+      - name: Inspect .deb metadata
+        run: |
+          for deb in packages/joblet-flow_*.deb; do
+            echo "Inspecting $deb..."
+            dpkg-deb -I "$deb"
+            dpkg-deb -c "$deb"
+          done
+
+      - name: Inspect .rpm metadata
+        run: |
+          sudo apt-get update && sudo apt-get install -y rpm
+          for rpm in packages/joblet-flow-*.rpm; do
+            echo "Inspecting $rpm..."
+            rpm -qip "$rpm"
+            rpm -qlp "$rpm"
+          done
+
+      - name: Install the native-arch package
+        run: |
+          deb=$(ls packages/joblet-flow_*_amd64.deb)
+          # dpkg -i runs postinst, which enables the unit; the service cannot
+          # start without a joblet on the host, which is expected here.
+          sudo dpkg -i "$deb" || true
+          test -x /opt/joblet-flow/bin/joblet-flow
+          test -f /etc/systemd/system/joblet-flow.service
+          systemctl is-enabled joblet-flow.service || true
+          echo "Package installs and registers its unit."
+
+  release:
+    name: Publish release
+    needs: [ build-deb, build-rpm, test-packages ]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Checksums
+        run: |
+          cd dist
+          sha256sum joblet-flow_*.deb joblet-flow-*.rpm > SHA256SUMS.txt
+          ls -la
+
+      - name: Create release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            dist/joblet-flow_*.deb
+            dist/joblet-flow-*.rpm
+            dist/SHA256SUMS.txt
+          generate_release_notes: true
+          body: |
+            joblet-flow is a durable workflow engine whose activities run as
+            isolated joblet jobs. It requires a joblet install on the same
+            host and reads its mTLS credentials from the joblet install's
+            configuration.
+
+            ## Install (Linux)
+
+            ### Debian/Ubuntu
+            ```bash
+            # AMD64
+            wget https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/joblet-flow_${{ needs.build-deb.outputs.version }}_amd64.deb
+            sudo dpkg -i joblet-flow_${{ needs.build-deb.outputs.version }}_amd64.deb
+
+            # ARM64
+            wget https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/joblet-flow_${{ needs.build-deb.outputs.version }}_arm64.deb
+            sudo dpkg -i joblet-flow_${{ needs.build-deb.outputs.version }}_arm64.deb
+            ```
+
+            ### RHEL/CentOS/Fedora
+            ```bash
+            # x86_64
+            sudo yum install -y https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/joblet-flow-${{ needs.build-deb.outputs.version }}-1.x86_64.rpm
+
+            # aarch64
+            sudo yum install -y https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/joblet-flow-${{ needs.build-deb.outputs.version }}-1.aarch64.rpm
+            ```
+
+            The package enables and starts `joblet-flow.service`, which listens
+            on `127.0.0.1:50055`. It needs a running joblet on the same host;
+            without one the service stays down until joblet is installed.
+
+            ## Verify checksums
+            ```bash
+            curl -LO https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/SHA256SUMS.txt
+            sha256sum -c SHA256SUMS.txt
+            ```
+
+            ## Compatibility
+
+            Requires joblet-proto v2.6.0 or later and any joblet server on
+            proto v2.x. See COMPATIBILITY.md.

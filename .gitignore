@@ -35,3 +35,14 @@ go.work.sum
 /bin/
 *.deb
 joblet-flow-deb-*/
+
+# TLS material and populated rnx configs must never be committed (they appear
+# in the working tree during e2e). See the family security-hygiene rule.
+*.pem
+*.key
+*.crt
+*.cnf
+*.csr
+*.srl
+rnx-config.yml
+rnx-config-*.yml
