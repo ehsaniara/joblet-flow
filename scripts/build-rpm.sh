@@ -43,12 +43,17 @@ tar czf "$BUILD_DIR/SOURCES/${PACKAGE_NAME}-${CLEAN_VERSION}.tar.gz" \
     -C "$BUILD_DIR/SOURCES" "${PACKAGE_NAME}-${CLEAN_VERSION}"
 
 cat > "$BUILD_DIR/SPECS/${PACKAGE_NAME}.spec" << EOF
+# The binary is a prebuilt, cross-compiled, already-stripped (Go -w -s) static
+# binary; skip debuginfo and the host-arch strip/brp post-install steps.
+%global debug_package %{nil}
+%define _build_id_links none
+%global __os_install_post %{nil}
+
 Name:           ${PACKAGE_NAME}
 Version:        ${CLEAN_VERSION}
 Release:        1%{?dist}
 Summary:        Joblet Flow Engine - durable workflow orchestrator
 License:        MIT
-BuildArch:      ${RPM_ARCH}
 Source0:        ${PACKAGE_NAME}-${CLEAN_VERSION}.tar.gz
 Requires:       systemd
 
@@ -98,6 +103,7 @@ fi
 EOF
 
 rpmbuild --define "_topdir $(pwd)/$BUILD_DIR" \
+    --define "_arch $RPM_ARCH" \
     --target "$RPM_ARCH" \
     -bb "$BUILD_DIR/SPECS/${PACKAGE_NAME}.spec"
 
