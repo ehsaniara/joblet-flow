@@ -171,7 +171,11 @@ func TestRunWorkerActivity_DispatchCompleteMemoize(t *testing.T) {
 		t.Fatalf("task input = %q, want in", task.GetInput())
 	}
 
-	e.CompleteActivity(context.Background(), &pb.CompleteActivityRequest{WorkflowId: "wf-1", Step: 0, Result: []byte("out")})
+	if _, err := e.CompleteActivity(context.Background(), &pb.CompleteActivityRequest{WorkflowId: "wf-1", Step: 0, Result: []byte("out")}); err != nil {
+
+		t.Fatalf("setup: %v", err)
+
+	}
 
 	got := <-done
 	if got.err != nil {
@@ -208,9 +212,13 @@ func TestRunWorkerActivity_RetriesThenCompletes(t *testing.T) {
 	}()
 
 	pollActivity(t, e, 2*time.Second) // attempt 1
-	e.FailActivity(context.Background(), &pb.FailActivityRequest{WorkflowId: "wf-1", Step: 0, Error: "boom"})
+	if _, err := e.FailActivity(context.Background(), &pb.FailActivityRequest{WorkflowId: "wf-1", Step: 0, Error: "boom"}); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
 	pollActivity(t, e, 2*time.Second) // attempt 2 (re-dispatched)
-	e.CompleteActivity(context.Background(), &pb.CompleteActivityRequest{WorkflowId: "wf-1", Step: 0, Result: []byte("ok")})
+	if _, err := e.CompleteActivity(context.Background(), &pb.CompleteActivityRequest{WorkflowId: "wf-1", Step: 0, Result: []byte("ok")}); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
 
 	r := <-done
 	if string(r.GetResult()) != "ok" || r.GetError() != "" {
@@ -230,9 +238,13 @@ func TestRunWorkerActivity_FailsAfterRetries(t *testing.T) {
 	}()
 
 	pollActivity(t, e, 2*time.Second)
-	e.FailActivity(context.Background(), &pb.FailActivityRequest{WorkflowId: "wf-1", Step: 0, Error: "boom"})
+	if _, err := e.FailActivity(context.Background(), &pb.FailActivityRequest{WorkflowId: "wf-1", Step: 0, Error: "boom"}); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
 	pollActivity(t, e, 2*time.Second)
-	e.FailActivity(context.Background(), &pb.FailActivityRequest{WorkflowId: "wf-1", Step: 0, Error: "boom-final"})
+	if _, err := e.FailActivity(context.Background(), &pb.FailActivityRequest{WorkflowId: "wf-1", Step: 0, Error: "boom-final"}); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
 
 	r := <-done
 	if r.GetError() == "" {
@@ -245,7 +257,9 @@ func TestWaitSignal_BufferedBeforeWait(t *testing.T) {
 	ctx := context.Background()
 
 	// Signal arrives before the workflow waits - it must be buffered.
-	e.SignalWorkflow(ctx, &pb.SignalWorkflowRequest{WorkflowId: "wf-1", Name: "approve", Payload: []byte("yes")})
+	if _, err := e.SignalWorkflow(ctx, &pb.SignalWorkflowRequest{WorkflowId: "wf-1", Name: "approve", Payload: []byte("yes")}); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
 	resp, err := e.WaitSignal(ctx, &pb.WaitSignalRequest{WorkflowId: "wf-1", Name: "approve", Step: 0})
 	if err != nil {
 		t.Fatalf("WaitSignal: %v", err)
@@ -264,7 +278,9 @@ func TestWaitSignal_BlocksThenDelivered(t *testing.T) {
 	}()
 
 	// Delivered whether it buffers (waiter not yet registered) or hands off directly.
-	e.SignalWorkflow(context.Background(), &pb.SignalWorkflowRequest{WorkflowId: "wf-1", Name: "approve", Payload: []byte("go")})
+	if _, err := e.SignalWorkflow(context.Background(), &pb.SignalWorkflowRequest{WorkflowId: "wf-1", Name: "approve", Payload: []byte("go")}); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
 	select {
 	case p := <-done:
 		if string(p) != "go" {
@@ -279,14 +295,20 @@ func TestWaitSignal_MemoizesByStep(t *testing.T) {
 	e := newEngine(&fakeRunner{})
 	ctx := context.Background()
 
-	e.SignalWorkflow(ctx, &pb.SignalWorkflowRequest{WorkflowId: "wf-1", Name: "s", Payload: []byte("first")})
+	if _, err := e.SignalWorkflow(ctx, &pb.SignalWorkflowRequest{WorkflowId: "wf-1", Name: "s", Payload: []byte("first")}); err != nil {
+
+		t.Fatalf("setup: %v", err)
+
+	}
 	r1, _ := e.WaitSignal(ctx, &pb.WaitSignalRequest{WorkflowId: "wf-1", Name: "s", Step: 0})
 	if string(r1.GetPayload()) != "first" {
 		t.Fatalf("r1 = %q, want first", r1.GetPayload())
 	}
 
 	// A second signal must not be consumed by a replay of step 0 (memoized).
-	e.SignalWorkflow(ctx, &pb.SignalWorkflowRequest{WorkflowId: "wf-1", Name: "s", Payload: []byte("second")})
+	if _, err := e.SignalWorkflow(ctx, &pb.SignalWorkflowRequest{WorkflowId: "wf-1", Name: "s", Payload: []byte("second")}); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
 	r2, _ := e.WaitSignal(ctx, &pb.WaitSignalRequest{WorkflowId: "wf-1", Name: "s", Step: 0})
 	if string(r2.GetPayload()) != "first" {
 		t.Fatalf("replay r2 = %q, want first (memoized)", r2.GetPayload())
@@ -320,7 +342,11 @@ func TestCompleteAndGetWorkflow(t *testing.T) {
 	e := newEngine(&fakeRunner{})
 	ctx := context.Background()
 
-	e.StartWorkflow(ctx, &pb.StartWorkflowRequest{Workflow: "greet", WorkflowId: "wf-1"})
+	if _, err := e.StartWorkflow(ctx, &pb.StartWorkflowRequest{Workflow: "greet", WorkflowId: "wf-1"}); err != nil {
+
+		t.Fatalf("setup: %v", err)
+
+	}
 	if _, err := e.CompleteTask(ctx, &pb.CompleteTaskRequest{WorkflowId: "wf-1", Result: []byte("done")}); err != nil {
 		t.Fatalf("CompleteTask: %v", err)
 	}
