@@ -52,7 +52,9 @@ func main() {
 		srv.GracefulStop()
 	}()
 
-	log.Info("joblet-flow engine listening", "addr", cfg.ListenAddr, "joblet_addr", cfg.JobletAddr)
+	// The joblet target is logged by jobletclient.Connect with its real
+	// resolved address (config node in mTLS mode, JOBLET_ADDR when insecure).
+	log.Info("joblet-flow engine listening", "addr", cfg.ListenAddr)
 	if err := srv.Serve(lis); err != nil {
 		log.Error("server stopped", "error", err)
 		os.Exit(1)
