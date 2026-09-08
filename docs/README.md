@@ -9,7 +9,7 @@
 - **[DEVELOPMENT](DEVELOPMENT.md)** - layout, make targets, tests, CLI (rnx),
   adding a durable store.
 - **[RNX_FLOW_CLI](RNX_FLOW_CLI.md)** - design for the `rnx flow` command group
-  (to implement in the joblet repo).
+  (to implement in joblet-rnx, where rnx lives).
 
 New here? Start with the [top-level README](../README.md) for the overview and
 quick start, then read [ARCHITECTURE](ARCHITECTURE.md).

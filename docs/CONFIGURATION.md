@@ -26,7 +26,7 @@ version: "3.0"
 nodes:
   admin:
     isDefault: true  # used when no node name is specified
-    address: "10.0.0.10:50051"
+    address: "127.0.0.1:50051"  # joblet on the same host
     cert: |
       -----BEGIN CERTIFICATE-----
       ...
@@ -61,8 +61,20 @@ JOBLET_INSECURE=1 JOBLET_ADDR=localhost:50051 ./bin/joblet-flow
 ```
 
 No certificates required. Against a real joblet (which mandates mTLS) activity
-dispatch will fail - this mode is for engine-only development and the
-lifecycle e2e suite.
+dispatch fails - this mode is for engine-only development.
+
+## Installed service
+
+The `.deb` installs a systemd unit that sets:
+
+| Variable           | Value                                  | Reason                                        |
+|--------------------|----------------------------------------|-----------------------------------------------|
+| `FLOW_LISTEN_ADDR` | `127.0.0.1:50055`                      | `FlowService` has no authentication; loopback only |
+| `JOBLET_CONFIG`    | `/opt/joblet/config/rnx-config.yml`    | the joblet install's client credentials       |
+
+The service runs as root (the config file is root-only) and starts after
+`joblet.service`. With joblet absent the service fails to start until joblet
+is installed.
 
 ## SDK ↔ engine link
 

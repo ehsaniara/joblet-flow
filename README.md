@@ -1,9 +1,10 @@
 # joblet-flow
 
-The **joblet-flow engine** - a language-agnostic durable workflow orchestrator.
+The **joblet-flow engine** - a language-agnostic workflow orchestrator.
 It owns control flow; SDK workers (`joblet-flow-sdk-python`, `-node`, …) run the
-actual workflow and activity code. An **activity is an isolated joblet job**: the
-engine dispatches it through joblet's `JobService` and records its result.
+actual workflow and activity code. An **activity can run as an isolated joblet
+job**: the engine dispatches it through joblet's `JobService` and records its
+result.
 
 The gRPC contract is [`joblet-proto/proto/flow/flow.proto`](../joblet-proto/proto/flow/flow.proto)
 (`FlowService`). Every SDK generates its client from that file.
@@ -15,10 +16,10 @@ The gRPC contract is [`joblet-proto/proto/flow/flow.proto`](../joblet-proto/prot
 ## What the engine does (and doesn't)
 
 **Owns - logic and orchestration only:**
-- Durable workflow state keyed by `workflow_id`
+- Workflow state keyed by `workflow_id` (behind a pluggable `Store`)
 - Task queues that workers long-poll (`PollTask`)
-- Dispatch of activities as joblet jobs (`RunActivity` → joblet `RunJob`, wait
-  for terminal status, capture logs)
+- Dispatch of job activities as joblet jobs (`RunActivity` → joblet `RunJob`,
+  wait for terminal status, capture logs)
 - Step-indexed memoization of activity + side-effect results → deterministic
   replay and idempotency
 - Retry policy, signals, `workflow_id` idempotency
@@ -31,18 +32,25 @@ The gRPC contract is [`joblet-proto/proto/flow/flow.proto`](../joblet-proto/prot
 
 ## Architecture
 
-```
- Client            joblet-flow engine (this repo)        SDK worker
- ------            ------------------------------        ----------
- StartWorkflow ───▶ enqueue workflow task
-                                            ◀─ PollTask ─ long-poll
-                    hand out task ──────────────────────▶ run workflow handler
-                                            ◀─ RunActivity(step, jobspec)
-                    joblet RunJob ─▶ isolated job
-                    wait terminal, capture logs
-                                   ── result ───────────▶ handler continues
-                                            ◀─ CompleteTask / FailTask
- GetWorkflow  ◀──── status + result
+```mermaid
+sequenceDiagram
+  participant C as Client
+  participant E as joblet-flow engine
+  participant W as SDK worker
+  participant J as joblet
+
+  C->>E: StartWorkflow
+  E->>E: enqueue workflow task
+  W->>E: PollTask (long-poll)
+  E-->>W: task
+  W->>W: run workflow handler
+  W->>E: RunActivity(step, jobspec)
+  E->>J: RunJob (mTLS, isolated job)
+  J-->>E: terminal status + logs
+  E-->>W: result (memoized by step)
+  W->>E: CompleteTask / FailTask
+  C->>E: GetWorkflow
+  E-->>C: status + result
 ```
 
 ## FlowService RPCs
@@ -50,12 +58,15 @@ The gRPC contract is [`joblet-proto/proto/flow/flow.proto`](../joblet-proto/prot
 | RPC | Caller | Purpose |
 |-----|--------|---------|
 | `StartWorkflow` | client | begin a run (idempotent on `workflow_id`) |
+| `GetWorkflow` | client | read status / result |
+| `SignalWorkflow` | client | deliver an external signal |
 | `PollTask` | worker | long-poll for the next task |
 | `CompleteTask` / `FailTask` | worker | report the run's terminal result |
 | `RunActivity` | handler | run an activity as a joblet job, memoized by `step` |
+| `RunWorkerActivity` | handler | run a named activity on a worker, memoized by `step` |
+| `CompleteActivity` / `FailActivity` | activity worker | report a worker activity's outcome |
+| `WaitSignal` | handler | block for a named signal, memoized by `step` |
 | `GetSideEffect` / `RecordSideEffect` | handler | durable non-deterministic steps |
-| `SignalWorkflow` | client | deliver an external signal |
-| `GetWorkflow` | client | read status / result |
 
 ## Layout
 
@@ -64,17 +75,38 @@ cmd/joblet-flow        entrypoint: config, joblet dial, gRPC server
 internal/engine        FlowService implementation, Store interface, in-memory store
 internal/jobletclient  activity job runner over joblet's JobService
 internal/config        environment configuration
+debian/, scripts/      .deb packaging, systemd unit, e2e helpers
+tests/e2e              clean-room e2e suite and its test driver
 ```
+
+## Install
+
+joblet-flow ships as its own `.deb` with home `/opt/joblet-flow` and a systemd
+unit. It requires a joblet install on the same host: the unit reads mTLS
+credentials from `/opt/joblet/config/rnx-config.yml` and listens on loopback
+only (`127.0.0.1:50055`), since `FlowService` itself has no authentication.
+
+```bash
+./scripts/build-deb.sh            # -> joblet-flow_<version>_<arch>.deb
+sudo dpkg -i joblet-flow_*.deb    # installs, enables, and starts the service
+systemctl status joblet-flow
+```
+
+The package declares no dpkg dependency on joblet: joblet installs, runs, and
+uninstalls without regard to joblet-flow. With joblet absent, the flow service
+fails to start until joblet is installed again.
 
 ## Build & run
 
 ```bash
-make test         # unit tests (no live joblet needed)
+make test         # unit tests, cache disabled (no live joblet needed)
 make build        # -> bin/joblet-flow
-make pre-pr       # fmt + vet + tidy + tests + build
+make deb          # -> joblet-flow_<version>_<arch>.deb
+make e2e          # clean-room e2e (needs sudo, see below)
+make pre-pr       # unit tests + e2e, structurally identical to joblet's
 
 # mTLS to joblet (default): reads a node from rnx-config.yml
-FLOW_LISTEN_ADDR=:50055 JOBLET_CONFIG=~/.rnx/rnx-config.yml JOBLET_NODE=default make run
+FLOW_LISTEN_ADDR=:50055 JOBLET_CONFIG=~/.rnx/rnx-config.yml make run
 
 # insecure to joblet (dev only)
 JOBLET_INSECURE=1 JOBLET_ADDR=localhost:50051 make run
@@ -91,37 +123,35 @@ The engine dials joblet over **mTLS by default**, loading a node's embedded
 | `FLOW_LISTEN_ADDR` | `:50055` | FlowService listen address |
 | `JOBLET_CONFIG` | *(standard search paths)* | explicit `rnx-config.yml` |
 | `JOBLET_NODE` | *(isDefault node)* | node entry to dial; empty uses the node marked `isDefault: true` |
-| `JOBLET_INSECURE` | *(off)* | `1` = plaintext dial (dev/e2e), uses `JOBLET_ADDR` |
+| `JOBLET_INSECURE` | *(off)* | `1` = plaintext dial (dev only), uses `JOBLET_ADDR` |
 | `JOBLET_ADDR` | `localhost:50051` | target in insecure mode |
 
-## CLI & end-to-end tests
+## Clients & end-to-end tests
 
-There is no separate CLI for joblet-flow - **`rnx`** (the joblet CLI) is the
-client for the whole ecosystem. Applications use the language SDK
-([`joblet-flow-sdk-python`](../joblet-flow-sdk-python)).
+There is no separate CLI for joblet-flow - applications use the language SDKs
+([`joblet-flow-sdk-python`](../joblet-flow-sdk-python),
+[`joblet-flow-sdk-node`](../joblet-flow-sdk-node)), and the operator surface is
+designed as an `rnx flow` command group ([docs/RNX_FLOW_CLI.md](docs/RNX_FLOW_CLI.md)).
 
-End-to-end integration (a real worker + engine + real joblet node) is exercised
-by the **SDK's e2e** (`joblet-flow-sdk-python/tests/e2e`), which runs actual
-workflows and asserts real results. The engine itself is covered here by unit
-tests (`make test`).
+The e2e suite (`tests/e2e/run_tests.sh`, run by `make pre-pr`) is a clean-room
+validation on this host: it uninstalls joblet-flow AND joblet completely,
+installs the latest released joblet from GitHub, installs joblet-flow from the
+working tree as a `.deb`, and runs every suite fail-fast against the installed
+service. Suites drive a test-only driver over the `FlowService` contract and
+cross-check activity jobs from joblet's side via rnx:
 
-Suites: `01_lifecycle` (orchestration) and `02_activity` (dispatches a real
-`echo` job to joblet and asserts its stdout/exit + step memoization). The
-activity suite skips only on the `JOBLET_INSECURE` dev path - like the joblet
-GPU suites skip without hardware.
+- `01_lifecycle` - start, poll, complete/fail, `workflow_id` idempotency,
+  NotFound for unknown ids
+- `02_activity` - activities run as real joblet jobs (confirmed by rnx), step
+  replay is memoized, a retried failure produces exactly two attempts
+- `03_signal` - buffered delivery, live delivery to a blocked waiter, memoized
+  wait replay
 
 ## Status
 
-Walking skeleton. The full FlowService is implemented over an **in-memory**
-`Store` (state is lost on restart). Done: all 8 RPCs, step memoization, retry,
-long-poll, and **mTLS activity dispatch to a real joblet** (verified e2e). Not
-yet done:
-
-- **Durable store** (SQLite/Bolt) behind the existing `Store` interface - 
-  required for real durability and crash recovery
-- **Signal delivery** into a replaying workflow, and multi-node activity routing
-  (`FlowJobSpec.node`)
-- **At-least-once task delivery** - the in-memory queue can drop a task if a
-  worker's poll is cancelled at the instant a task is handed out (needs
-  lease/ack); fine for the skeleton
-- The **Python** and **Node** SDK workers
+The full `FlowService` is implemented over an **in-memory** `Store`, so state
+does not survive an engine restart; a durable store slots in behind the
+existing `Store` interface (see [ARCHITECTURE](docs/ARCHITECTURE.md) for the
+complete limitations table and roadmap). All RPCs, step memoization, retry,
+long-poll, signals, and mTLS activity dispatch to a real joblet are verified by
+the e2e suite on every pre-pr run.

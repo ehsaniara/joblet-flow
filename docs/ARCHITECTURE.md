@@ -18,7 +18,7 @@ job**, so agent-invoked tools and LLM-generated code execute sandboxed
 - [Activity dispatch to joblet](#activity-dispatch-to-joblet)
 - [Retry & backoff](#retry--backoff)
 - [State store](#state-store)
-- [Security (mTLS to joblet)](#security-mtls-to-joblet)
+- [Security](#security)
 - [Deployment topology](#deployment-topology)
 - [Failure modes & limitations](#failure-modes--limitations)
 - [Roadmap](#roadmap)
@@ -124,9 +124,8 @@ handler's control flow.
 - **Loops** are native `for`/`while` in the handler. Each iteration issues new
   steps (0, 1, 2, …); the engine never models the loop, it just memoizes each
   step. A bounded loop is a bounded, resumable sequence of activities.
-- **Fan-out / parallelism** - several activities in flight at once - is a planned
-  SDK capability (async futures over concurrent `RunActivity` calls). v1 issues
-  activities sequentially.
+- **Fan-out / parallelism** - v1 issues activities sequentially; the SDKs
+  expose no concurrent-activity API (see [roadmap](#roadmap)).
 
 **Where the loops live.** The engine runs *no* per-workflow loop - it is pure
 request/response. The only driving loop is the **worker's poll loop**
@@ -140,17 +139,13 @@ contains a cycle" check does not apply here.
 
 **The real concern is a runaway workflow** - e.g. `while True: run_activity(...)`
 
-- which would dispatch jobs and grow history without bound. This is the
-  imperative-model analog of a cycle, and its guardrails are **not yet
-  implemented** (see [limitations](#failure-modes--limitations)). Planned:
-
-- a per-run **max-step / max-history** cap that stops a workflow exceeding it,
-- an optional **workflow-level timeout**,
-- runaway growth surfaced in metrics.
-
-Until then, workflow authors own termination (bounded loops, explicit exit
-conditions). Note that per-activity **retry** is separately bounded by
-`RetryPolicy.max_attempts`, so a single flaky step can never loop forever.
+- which dispatches jobs and grows history without bound. This is the
+  imperative-model analog of a cycle, and the engine enforces **no guardrails**
+  against it: there is no max-step cap and no workflow-level timeout (see
+  [limitations](#failure-modes--limitations) and the [roadmap](#roadmap)).
+  Workflow authors own termination (bounded loops, explicit exit conditions).
+  Per-activity **retry** is separately bounded by `RetryPolicy.max_attempts`,
+  so a single flaky step can never loop forever.
 
 ## Determinism & replay
 
@@ -209,7 +204,7 @@ submits it, polls to a terminal status, and captures logs.
 |----------------------------------------------|----------------------------------------------------|
 | `runtime`, `command`, `args`, `env`          | same                                               |
 | `resources.max_cpu / max_memory / gpu_count` | `max_cpu / max_memory / gpu_count`                 |
-| `node`                                       | *(not yet honored - runs on the connected joblet)* |
+| `node`                                       | *(ignored - the job runs on the connected joblet)* |
 
 **Terminal statuses**: `COMPLETED` (success), `FAILED`, `STOPPED`, `TIMEOUT`
 (failures). Logs come from joblet's combined stream and are returned as
@@ -235,28 +230,84 @@ and the activity/side-effect memo. The current implementation is **in-memory**
 behind the same interface with no engine changes; that is the main gap between
 the current skeleton and a production engine.
 
-## Security (mTLS to joblet)
+## Security
 
-The engine dials joblet over **mTLS** by default, loading a node's embedded
-`cert`/`key`/`ca` from an `rnx-config.yml` (the same file rnx uses), with
-`ServerName: joblet` and TLS 1.3. A development `insecure` mode dials plaintext.
-See [CONFIGURATION.md](CONFIGURATION.md). The SDK ↔ engine link is plaintext gRPC
-today (mTLS is between the engine and joblet).
+**Trust domain.** joblet and joblet-flow share one root CA per host. The
+joblet cert ceremony provisions the whole trust domain: server leaves for
+joblet (`ServerName: joblet`) and for flow (`ServerName: joblet-flow`,
+loopback-only SANs, written to `/opt/joblet/config/joblet-flow-server.yml`),
+plus role client certs (admin/maintainer/developer/reader) used by rnx,
+admin-ui, the SDKs, and the engine itself. Containment: the flow server cert
+carries no `joblet` SAN so it cannot impersonate joblet, and server leaves are
+`serverAuth`-only so they fail client authentication. The root key does not
+survive the ceremony; no signing keys persist on the host.
+
+**Engine → joblet.** The engine dials joblet over **mTLS** by default, loading
+a node's embedded `cert`/`key`/`ca` from an `rnx-config.yml` (the same file
+rnx uses), with `ServerName: joblet` and TLS 1.3. A development `insecure`
+mode dials plaintext. See [CONFIGURATION.md](CONFIGURATION.md).
+
+**SDK/client → engine.** Plaintext gRPC on loopback only; `FlowService`
+performs no authentication, and the loopback listener is the access boundary.
+Serving TLS with the provisioned flow server cert and verifying role client
+certs (client-plane vs worker-plane authorization) is on the
+[roadmap](#roadmap) and is required before any worker runs off-host.
 
 ## Deployment topology
 
-```
- ┌────────┐     gRPC      ┌──────────────┐   mTLS    ┌──────────────┐
- │ client │ ───────────▶ │ joblet-flow  │ ────────▶ │ joblet node  │
- └────────┘              │  engine       │           │  (JobService)│
- ┌────────┐   PollTask   │  :50055       │           │  :50051      │
- │ worker │ ◀──────────▶ └──────────────┘           └──────────────┘
- └────────┘
+```mermaid
+flowchart LR
+  client[Client]
+  worker[SDK worker]
+  subgraph host[one host]
+    engine["joblet-flow engine
+    /opt/joblet-flow, systemd
+    127.0.0.1:50055"]
+    joblet["joblet node
+    /opt/joblet, systemd
+    JobService :50051"]
+  end
+  client -->|gRPC| engine
+  worker <-->|PollTask / activities| engine
+  engine -->|mTLS RunJob| joblet
 ```
 
-- Engine: one process, listens on `:50055` (`FLOW_LISTEN_ADDR`).
+- Engine: installed from its own `.deb` with home `/opt/joblet-flow` and a
+  systemd unit; the unit listens on loopback only (`FlowService` has no
+  authentication) and reads mTLS credentials from the joblet install.
 - Workers: one or more, scale by running more processes polling the queue.
-- joblet: one node today; multi-node routing (`FlowJobSpec.node`) is future work.
+- joblet: one node, on the same host; `FlowJobSpec.node` is ignored (see
+  [roadmap](#roadmap) for multi-node routing).
+
+### Install layout: separate homes
+
+joblet-flow and joblet keep **separate homes** with a one-way shared surface:
+
+```mermaid
+flowchart LR
+  subgraph jh["/opt/joblet - joblet-owned, wiped by joblet purge"]
+    cfg["config/ - host trust domain\nrnx-config.yml, embedded certs"]
+    jbin["bin/ - joblet, persist, state"]
+  end
+  subgraph fh["/opt/joblet-flow - flow-owned, survives joblet"]
+    fbin["bin/joblet-flow"]
+  end
+  fbin -->|reads only| cfg
+```
+
+- Each package owns exactly one tree. joblet's uninstall removes `/opt/joblet`
+  and verifies no residue; it never touches `/opt/joblet-flow`, and flow's
+  uninstall never touches `/opt/joblet`. Neither package declares a dpkg
+  dependency on the other.
+- The shared surface is read-only: flow reads the joblet install's client
+  configuration for mTLS credentials and writes nothing into joblet's home.
+- Anything flow must keep across joblet reinstalls (its binary, and a durable
+  store once one exists) lives under `/opt/joblet-flow`. joblet purges and
+  reinstalls freely, including several times per e2e run, without affecting it.
+- Shared home and shared lifecycle go together: `persist` and `state` live in
+  `/opt/joblet/bin` because they are subprocesses of joblet-core, in joblet's
+  package. flow releases independently, so it lives in its own home, the same
+  way rnx installs outside `/opt/joblet`.
 
 ## Failure modes & limitations
 
@@ -264,7 +315,7 @@ today (mTLS is between the engine and joblet).
 |-------------------|------------------------------------------------------------------------------------------------------------------------------------------------|
 | Engine restart    | In-memory state is lost (no durable store yet).                                                                                                |
 | Task delivery     | At-most-once: a task can be dropped if a worker's poll is cancelled exactly as the task is handed out (needs lease/ack).                       |
-| Signals           | Delivered into a running workflow via `WaitSignal` (buffered if early). Buffers are in-memory (lost on restart until the durable store lands). |
+| Signals           | Delivered into a running workflow via `WaitSignal` (buffered if early). Buffers are in-memory, lost on restart.                               |
 | Runaway workflows | No max-step / history cap or workflow-level timeout yet; an unbounded loop dispatches jobs without bound. Authors own termination.             |
 | Multi-node        | `FlowJobSpec.node` ignored; activities run on the connected joblet.                                                                            |
 | Activity streams  | `stdout` only (joblet combines streams); `stderr` empty.                                                                                       |
@@ -281,4 +332,8 @@ Toward a full durable-execution engine for agentic AI:
 5. **Durable store** (SQLite/Bolt) behind `Store` - real durability & recovery.
 6. **At-least-once delivery** - task lease + ack.
 7. **Runaway guardrails** - max-step / timeout for unbounded agent loops.
-8. **Multi-node routing** (`FlowJobSpec.node`); Node SDK; optional SDK↔engine mTLS.
+8. **FlowService mTLS + authorization** - serve TLS with the ceremony-provisioned
+   flow server cert, verify role client certs against the shared root, and split
+   authorization into a client plane (`Start`/`Get`/`Signal`) and a worker plane
+   (`Poll`/`Complete*`/activities); prerequisite for off-host workers.
+9. **Multi-node routing** (`FlowJobSpec.node`); Node SDK.

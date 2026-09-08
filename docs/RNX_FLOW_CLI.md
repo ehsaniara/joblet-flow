@@ -1,8 +1,8 @@
 # Design: `rnx flow` command group
 
 How joblet-flow is exposed through **`rnx`** (the joblet CLI) instead of a
-separate `flowctl`. This is a design to implement in the **joblet** repo (where
-rnx lives); the FlowService contract lives in `joblet-proto`.
+separate `flowctl`. This is a design to implement in the **joblet-rnx** repo
+(where rnx lives); the FlowService contract lives in `joblet-proto`.
 
 ## Goal & scope
 
@@ -32,7 +32,9 @@ nodes:
   admin:
     isDefault: true  # used when no node name is specified
     address: "10.0.0.10:50051"   # joblet JobService (existing)
-    flow:    "10.0.0.10:50055"   # joblet-flow FlowService (new, optional)
+    flow: "10.0.0.10:50055"   # joblet-flow FlowService (new, optional;
+      # remote reach requires FlowService mTLS,
+    # which today listens on loopback only)
     cert: | ...
     key:  | ...
     ca:   | ...

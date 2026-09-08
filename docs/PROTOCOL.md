@@ -115,7 +115,8 @@ Returns the run's current `status` and `result`. Errors: `NotFound` if unknown.
 **FlowJobSpec** `{ runtime, command, args, env, resources, node, volumes }` - the
 isolated joblet job backing an activity. `volumes` are joblet volumes mounted at
 `/volumes/<name>` (so activities can reach a codebase or persist artifacts).
-`node` selects a target joblet (not yet honored).
+`node` names a target joblet; the field is ignored and the job runs on the
+connected joblet.
 
 **FlowResources** `{ max_cpu (percent), max_memory (MB), gpu_count }` - joblet
 cgroup limits applied to the activity's job.
