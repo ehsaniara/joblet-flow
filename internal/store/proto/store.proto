@@ -1,0 +1,34 @@
+syntax = "proto3";
+
+// Internal framing between the flow engine (flow-core) and the flow-store
+// subprocess. Not a public contract: it is never published in joblet-proto and
+// may change with the two binaries in lockstep.
+package flowstore;
+
+option go_package = "github.com/ehsaniara/joblet-flow/internal/store/proto/gen;storepb";
+
+// EventType names the state mutation a StoreEvent carries.
+enum EventType {
+  EVENT_TYPE_UNSPECIFIED = 0;
+  EVENT_TYPE_CREATE_RUN = 1;
+  EVENT_TYPE_SET_RESULT = 2;
+  EVENT_TYPE_PUT_ACTIVITY = 3;
+  EVENT_TYPE_PUT_WORKER_ACTIVITY = 4;
+  EVENT_TYPE_PUT_SIDE_EFFECT = 5;
+  EVENT_TYPE_PUT_SIGNAL_WAIT = 6;
+  EVENT_TYPE_ENQUEUE = 7;
+}
+
+// StoreEvent is one durable state mutation, shipped length-prefixed over the
+// flow-store Unix socket. Payload is opaque bytes whose meaning depends on type
+// (a serialized Run, a RunActivityResponse, or a raw memo/result payload).
+message StoreEvent {
+  EventType type = 1;
+  string workflow_id = 2;
+  int32 step = 3;
+  string queue = 4;
+  string workflow = 5;
+  string status = 6;
+  string error = 7;
+  bytes payload = 8;
+}

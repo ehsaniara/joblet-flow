@@ -68,24 +68,14 @@ sequenceDiagram
 | `WaitSignal` | handler | block for a named signal, memoized by `step` |
 | `GetSideEffect` / `RecordSideEffect` | handler | durable non-deterministic steps |
 
-## Layout
-
-```
-cmd/joblet-flow        entrypoint: config, joblet dial, gRPC server
-internal/engine        FlowService implementation, Store interface, in-memory store
-internal/jobletclient  activity job runner over joblet's JobService
-internal/config        environment configuration
-debian/, scripts/      .deb packaging, systemd unit, e2e helpers
-tests/e2e              clean-room e2e suite and its test driver
-.github/workflows      CI and the tag-triggered release
-```
-
 ## Install
 
-joblet-flow ships as its own `.deb` with home `/opt/joblet-flow` and a systemd
-unit. It requires a joblet install on the same host: the unit reads mTLS
-credentials from `/opt/joblet/config/rnx-config.yml` and listens on loopback
-only (`127.0.0.1:50055`), since `FlowService` itself has no authentication.
+joblet-flow ships as its own `.deb`/`.rpm` (amd64 and arm64) with home
+`/opt/joblet-flow` and a systemd unit. It requires a joblet install on the same
+host: the unit reads mTLS credentials from the joblet install and listens on
+loopback only (`127.0.0.1:50055`), since `FlowService` has no authentication.
+The package declares no dpkg dependency on joblet; with joblet absent, the
+service simply fails to start.
 
 ```bash
 ./scripts/build-deb.sh            # -> joblet-flow_<version>_<arch>.deb
@@ -93,69 +83,34 @@ sudo dpkg -i joblet-flow_*.deb    # installs, enables, and starts the service
 systemctl status joblet-flow
 ```
 
-RPM packages (`./scripts/build-rpm.sh`, needs `rpmbuild`) are built for both
-architectures too; releases publish `.deb` and `.rpm` for amd64 and arm64.
+See [CONFIGURATION](docs/CONFIGURATION.md) for the installed service and how the
+engine connects to joblet.
 
-The package declares no dpkg dependency on joblet: joblet installs, runs, and
-uninstalls without regard to joblet-flow. With joblet absent, the flow service
-fails to start until joblet is installed again.
-
-## Build & run
+## Build & test
 
 ```bash
-make test         # unit tests, cache disabled (no live joblet needed)
-make build        # -> bin/joblet-flow
-make deb          # -> joblet-flow_<version>_<arch>.deb
-make e2e          # clean-room e2e (needs sudo, see below)
-make pre-pr       # unit tests + e2e, structurally identical to joblet's
-
-# mTLS to joblet (default): reads a node from rnx-config.yml
-FLOW_LISTEN_ADDR=:50055 JOBLET_CONFIG=~/.rnx/rnx-config.yml make run
-
-# insecure to joblet (dev only)
-JOBLET_INSECURE=1 JOBLET_ADDR=localhost:50051 make run
+make build     # -> bin/joblet-flow
+make test      # unit tests (no live joblet needed)
+make pre-pr    # unit tests + clean-room e2e, structurally identical to joblet's
 ```
 
-### Connecting to joblet
+The e2e suite is a clean-room validation (uninstalls flow and joblet, installs
+the latest released joblet, installs flow from the tree, runs every suite
+against the installed service). Details, make targets, and the layout are in
+[DEVELOPMENT](docs/DEVELOPMENT.md).
 
-The engine dials joblet over **mTLS by default**, loading a node's embedded
-`cert`/`key`/`ca` from an `rnx-config.yml` (the same file rnx uses), with
-`ServerName: joblet` and TLS 1.3.
-
-| Env | Default | Purpose |
-|-----|---------|---------|
-| `FLOW_LISTEN_ADDR` | `:50055` | FlowService listen address |
-| `JOBLET_CONFIG` | *(standard search paths)* | explicit `rnx-config.yml` |
-| `JOBLET_NODE` | *(isDefault node)* | node entry to dial; empty uses the node marked `isDefault: true` |
-| `JOBLET_INSECURE` | *(off)* | `1` = plaintext dial (dev only), uses `JOBLET_ADDR` |
-| `JOBLET_ADDR` | `localhost:50051` | target in insecure mode |
-
-## Clients & end-to-end tests
+## Clients
 
 There is no separate CLI for joblet-flow - applications use the language SDKs
 ([`joblet-flow-sdk-python`](../joblet-flow-sdk-python),
 [`joblet-flow-sdk-node`](../joblet-flow-sdk-node)), and the operator surface is
 designed as an `rnx flow` command group ([docs/RNX_FLOW_CLI.md](docs/RNX_FLOW_CLI.md)).
 
-The e2e suite (`tests/e2e/run_tests.sh`, run by `make pre-pr`) is a clean-room
-validation on this host: it uninstalls joblet-flow AND joblet completely,
-installs the latest released joblet from GitHub, installs joblet-flow from the
-working tree as a `.deb`, and runs every suite fail-fast against the installed
-service. Suites drive a test-only driver over the `FlowService` contract and
-cross-check activity jobs from joblet's side via rnx:
-
-- `01_lifecycle` - start, poll, complete/fail, `workflow_id` idempotency,
-  NotFound for unknown ids
-- `02_activity` - activities run as real joblet jobs (confirmed by rnx), step
-  replay is memoized, a retried failure produces exactly two attempts
-- `03_signal` - buffered delivery, live delivery to a blocked waiter, memoized
-  wait replay
-
 ## Status
 
-The full `FlowService` is implemented over an **in-memory** `Store`, so state
-does not survive an engine restart; a durable store slots in behind the
-existing `Store` interface (see [ARCHITECTURE](docs/ARCHITECTURE.md) for the
-complete limitations table and roadmap). All RPCs, step memoization, retry,
-long-poll, signals, and mTLS activity dispatch to a real joblet are verified by
-the e2e suite on every pre-pr run.
+The full `FlowService` runs over an in-memory authoritative `Store`. With
+`FLOW_STORE_SOCKET` set, mutations are also persisted to disk by the supervised
+`flow-store` subprocess (an event log), keeping flow-core free of storage
+dependencies. Recovery on restart (replaying that log) is the next step. See
+[ARCHITECTURE](docs/ARCHITECTURE.md) for the design, complete limitations
+table, and roadmap.
