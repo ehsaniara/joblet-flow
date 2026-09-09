@@ -23,21 +23,24 @@ esac
 
 echo "📦 Building ${PACKAGE_NAME}-${CLEAN_VERSION}.${RPM_ARCH}.rpm..."
 
-# Build and verify the engine binary for the target arch
+# Build and verify both binaries for the target arch
 GOOS=linux GOARCH="$GOARCH" CGO_ENABLED=0 go build -o bin/joblet-flow ./cmd/joblet-flow
+GOOS=linux GOARCH="$GOARCH" CGO_ENABLED=0 go build -o bin/flow-store ./cmd/flow-store
 case "$RPM_ARCH" in
     x86_64) EXPECTED="x86-64" ;;
     aarch64) EXPECTED="aarch64" ;;
 esac
-if ! file bin/joblet-flow | grep -q "$EXPECTED"; then
-    echo "❌ bin/joblet-flow is not $EXPECTED"; exit 1
-fi
+for b in joblet-flow flow-store; do
+    if ! file "bin/$b" | grep -q "$EXPECTED"; then
+        echo "❌ bin/$b is not $EXPECTED"; exit 1
+    fi
+done
 
 rm -rf "$BUILD_DIR"
 mkdir -p "$BUILD_DIR"/{BUILD,BUILDROOT,RPMS,SOURCES,SPECS,SRPMS}
 SRC="$BUILD_DIR/SOURCES/${PACKAGE_NAME}-${CLEAN_VERSION}"
 mkdir -p "$SRC"
-cp bin/joblet-flow "$SRC/"
+cp bin/joblet-flow bin/flow-store "$SRC/"
 cp scripts/joblet-flow.service "$SRC/"
 tar czf "$BUILD_DIR/SOURCES/${PACKAGE_NAME}-${CLEAN_VERSION}.tar.gz" \
     -C "$BUILD_DIR/SOURCES" "${PACKAGE_NAME}-${CLEAN_VERSION}"
@@ -69,6 +72,7 @@ using the joblet install's client configuration.
 mkdir -p \$RPM_BUILD_ROOT/opt/joblet-flow/bin
 mkdir -p \$RPM_BUILD_ROOT/etc/systemd/system
 install -m 755 joblet-flow \$RPM_BUILD_ROOT/opt/joblet-flow/bin/joblet-flow
+install -m 755 flow-store \$RPM_BUILD_ROOT/opt/joblet-flow/bin/flow-store
 install -m 644 joblet-flow.service \$RPM_BUILD_ROOT/etc/systemd/system/joblet-flow.service
 
 %post
@@ -95,6 +99,7 @@ fi
 %files
 %defattr(-,root,root,-)
 /opt/joblet-flow/bin/joblet-flow
+/opt/joblet-flow/bin/flow-store
 /etc/systemd/system/joblet-flow.service
 
 %changelog

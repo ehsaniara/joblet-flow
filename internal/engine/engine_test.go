@@ -363,3 +363,22 @@ func TestCompleteAndGetWorkflow(t *testing.T) {
 		t.Fatalf("expected NotFound for unknown workflow")
 	}
 }
+
+// TestDeliverBeforeRegister_IsBuffered covers the retry race: an activity
+// outcome reported before its waiter registers must be buffered and delivered
+// on the next register, not dropped.
+func TestDeliverBeforeRegister_IsBuffered(t *testing.T) {
+	e := newEngine(&fakeRunner{})
+	// deliver arrives first, with no pending waiter.
+	e.deliver("wf-1", 0, activityOutcome{result: []byte("late")})
+	// the next register must immediately yield the buffered outcome.
+	ch := e.registerPending("wf-1", 0)
+	select {
+	case out := <-ch:
+		if string(out.result) != "late" {
+			t.Fatalf("got %q, want late", out.result)
+		}
+	default:
+		t.Fatal("buffered outcome was not delivered on register")
+	}
+}

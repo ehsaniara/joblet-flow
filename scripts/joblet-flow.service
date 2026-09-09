@@ -11,6 +11,9 @@ ExecStart=/opt/joblet-flow/bin/joblet-flow
 Environment=FLOW_LISTEN_ADDR=127.0.0.1:50055
 # mTLS credentials come from the joblet install on this host
 Environment=JOBLET_CONFIG=/opt/joblet/config/rnx-config.yml
+# Durable state: the engine supervises flow-store, which persists to disk
+Environment=FLOW_STORE_SOCKET=/opt/joblet-flow/run/flow-store.sock
+Environment=FLOW_STORE_DIR=/opt/joblet-flow/state
 User=root
 Restart=on-failure
 RestartSec=2

@@ -175,6 +175,80 @@ func main() {
 		}
 		fmt.Printf("%s\n", resp.GetPayload())
 
+	case "run-worker-activity":
+		fs := flag.NewFlagSet(cmd, flag.ExitOnError)
+		id := fs.String("id", "", "workflow id")
+		step := fs.Int("step", 0, "step index")
+		name := fs.String("name", "activity", "activity name")
+		input := fs.String("input", "", "activity input")
+		attempts := fs.Int("max-attempts", 1, "retry attempts")
+		_ = fs.Parse(args)
+		req := &pb.RunWorkerActivityRequest{
+			WorkflowId: *id, Step: int32(*step), Name: *name, Input: []byte(*input),
+		}
+		if *attempts > 1 {
+			req.Retry = &pb.RetryPolicy{MaxAttempts: int32(*attempts), BaseMs: 100}
+		}
+		resp, err := fc.RunWorkerActivity(ctx, req)
+		if err != nil {
+			fatal("run-worker-activity: %v", err)
+		}
+		// Line: result then error (one of them empty).
+		fmt.Printf("%s\t%s\n", resp.GetResult(), resp.GetError())
+
+	case "complete-activity":
+		fs := flag.NewFlagSet(cmd, flag.ExitOnError)
+		id := fs.String("id", "", "workflow id")
+		step := fs.Int("step", 0, "step index")
+		result := fs.String("result", "", "activity result")
+		_ = fs.Parse(args)
+		if _, err := fc.CompleteActivity(ctx, &pb.CompleteActivityRequest{
+			WorkflowId: *id, Step: int32(*step), Result: []byte(*result),
+		}); err != nil {
+			fatal("complete-activity: %v", err)
+		}
+
+	case "fail-activity":
+		fs := flag.NewFlagSet(cmd, flag.ExitOnError)
+		id := fs.String("id", "", "workflow id")
+		step := fs.Int("step", 0, "step index")
+		errMsg := fs.String("error", "boom", "failure message")
+		_ = fs.Parse(args)
+		if _, err := fc.FailActivity(ctx, &pb.FailActivityRequest{
+			WorkflowId: *id, Step: int32(*step), Error: *errMsg,
+		}); err != nil {
+			fatal("fail-activity: %v", err)
+		}
+
+	case "record-side-effect":
+		fs := flag.NewFlagSet(cmd, flag.ExitOnError)
+		id := fs.String("id", "", "workflow id")
+		step := fs.Int("step", 0, "step index")
+		data := fs.String("data", "", "side-effect data")
+		_ = fs.Parse(args)
+		if _, err := fc.RecordSideEffect(ctx, &pb.RecordSideEffectRequest{
+			WorkflowId: *id, Step: int32(*step), Data: []byte(*data),
+		}); err != nil {
+			fatal("record-side-effect: %v", err)
+		}
+
+	case "get-side-effect":
+		fs := flag.NewFlagSet(cmd, flag.ExitOnError)
+		id := fs.String("id", "", "workflow id")
+		step := fs.Int("step", 0, "step index")
+		_ = fs.Parse(args)
+		resp, err := fc.GetSideEffect(ctx, &pb.GetSideEffectRequest{
+			WorkflowId: *id, Step: int32(*step),
+		})
+		if err != nil {
+			fatal("get-side-effect: %v", err)
+		}
+		if !resp.GetFound() {
+			fmt.Println("NOTFOUND")
+			return
+		}
+		fmt.Printf("%s\n", resp.GetData())
+
 	default:
 		fatal("unknown subcommand %q", cmd)
 	}

@@ -2,10 +2,12 @@
 package main
 
 import (
+	"context"
 	"log/slog"
 	"net"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 
 	pb "github.com/ehsaniara/joblet-proto/v2/gen/flow"
@@ -14,6 +16,7 @@ import (
 	"github.com/ehsaniara/joblet-flow/internal/config"
 	"github.com/ehsaniara/joblet-flow/internal/engine"
 	"github.com/ehsaniara/joblet-flow/internal/jobletclient"
+	"github.com/ehsaniara/joblet-flow/internal/store"
 )
 
 func main() {
@@ -33,7 +36,30 @@ func main() {
 	}
 	defer conn.Close()
 
-	eng := engine.New(engine.NewMemStore(), jobletclient.NewRunner(conn, log), log)
+	// State is authoritative in memory; when a flow-store socket is configured,
+	// mutations are also published and shipped to the supervised flow-store
+	// subprocess for durability.
+	storeCtx, stopStore := context.WithCancel(context.Background())
+	defer stopStore()
+	var st engine.Store = engine.NewMemStore()
+	if cfg.StoreSocket != "" {
+		ps := store.NewPubSub(0)
+		defer ps.Close()
+		st = engine.NewPublishingStore(st, ps)
+
+		bin := cfg.StoreBin
+		if bin == "" {
+			bin = resolveFlowStoreBin(log)
+		}
+		go store.NewSubprocess(bin, cfg.StoreSocket, cfg.StoreDir, log).Run(storeCtx)
+
+		shipper, unsub := store.NewShipper(cfg.StoreSocket, ps, log)
+		defer unsub()
+		go shipper.Run(storeCtx)
+		log.Info("durable state enabled", "flow_store_socket", cfg.StoreSocket, "dir", cfg.StoreDir)
+	}
+
+	eng := engine.New(st, jobletclient.NewRunner(conn, log), log)
 
 	srv := grpc.NewServer()
 	pb.RegisterFlowServiceServer(srv, eng)
@@ -59,4 +85,14 @@ func main() {
 		log.Error("server stopped", "error", err)
 		os.Exit(1)
 	}
+}
+
+// resolveFlowStoreBin finds the flow-store binary next to the running engine.
+func resolveFlowStoreBin(log *slog.Logger) string {
+	exe, err := os.Executable()
+	if err != nil {
+		log.Warn("cannot resolve executable path; assuming flow-store on PATH", "error", err)
+		return "flow-store"
+	}
+	return filepath.Join(filepath.Dir(exe), "flow-store")
 }

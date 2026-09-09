@@ -26,9 +26,13 @@ type Engine struct {
 	runner JobRunner
 	log    *slog.Logger
 
-	// pending correlates an in-flight worker activity to its blocked RunWorkerActivity call.
-	mu      sync.Mutex
-	pending map[string]chan activityOutcome
+	// pending correlates an in-flight worker activity to its blocked
+	// RunWorkerActivity call. buffered holds an outcome that arrived before its
+	// waiter registered (e.g. a worker reporting during a retry's backoff), so
+	// it is delivered on the next register instead of being lost.
+	mu       sync.Mutex
+	pending  map[string]chan activityOutcome
+	buffered map[string]activityOutcome
 
 	signals *signalHub
 }
@@ -45,11 +49,12 @@ func New(store Store, runner JobRunner, log *slog.Logger) *Engine {
 		log = slog.Default()
 	}
 	return &Engine{
-		store:   store,
-		runner:  runner,
-		log:     log,
-		pending: make(map[string]chan activityOutcome),
-		signals: newSignalHub(),
+		store:    store,
+		runner:   runner,
+		log:      log,
+		pending:  make(map[string]chan activityOutcome),
+		buffered: make(map[string]activityOutcome),
+		signals:  newSignalHub(),
 	}
 }
 
@@ -239,25 +244,38 @@ func pendingKey(workflowID string, step int32) string {
 
 func (e *Engine) registerPending(workflowID string, step int32) chan activityOutcome {
 	ch := make(chan activityOutcome, 1)
+	key := pendingKey(workflowID, step)
 	e.mu.Lock()
-	e.pending[pendingKey(workflowID, step)] = ch
+	// An outcome that arrived before this register (e.g. during retry backoff)
+	// was buffered; deliver it now rather than waiting for a fresh report.
+	if out, ok := e.buffered[key]; ok {
+		delete(e.buffered, key)
+		ch <- out
+	} else {
+		e.pending[key] = ch
+	}
 	e.mu.Unlock()
 	return ch
 }
 
 func (e *Engine) clearPending(workflowID string, step int32) {
+	key := pendingKey(workflowID, step)
 	e.mu.Lock()
-	delete(e.pending, pendingKey(workflowID, step))
+	delete(e.pending, key)
+	delete(e.buffered, key)
 	e.mu.Unlock()
 }
 
-// deliver hands an outcome to the waiting RunWorkerActivity call, if any.
+// deliver hands an outcome to the waiting RunWorkerActivity call, or buffers it
+// if no waiter is currently registered so a report is never lost.
 func (e *Engine) deliver(workflowID string, step int32, out activityOutcome) {
 	key := pendingKey(workflowID, step)
 	e.mu.Lock()
 	ch, ok := e.pending[key]
 	if ok {
 		delete(e.pending, key)
+	} else {
+		e.buffered[key] = out
 	}
 	e.mu.Unlock()
 	if ok {

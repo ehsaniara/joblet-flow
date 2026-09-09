@@ -19,6 +19,10 @@ if [ ! -f "./bin/joblet-flow" ]; then
     echo "Building engine binary..."
     GOOS=linux GOARCH="$ARCH" CGO_ENABLED=0 go build -o bin/joblet-flow ./cmd/joblet-flow
 fi
+if [ ! -f "./bin/flow-store" ]; then
+    echo "Building flow-store binary..."
+    GOOS=linux GOARCH="$ARCH" CGO_ENABLED=0 go build -o bin/flow-store ./cmd/flow-store
+fi
 
 # Verify the binary architecture matches the target package architecture
 case "$ARCH" in
@@ -26,10 +30,14 @@ case "$ARCH" in
     arm64) EXPECTED_ARCH="aarch64" ;;
     *) EXPECTED_ARCH="" ;;
 esac
-if [ -n "$EXPECTED_ARCH" ] && ! file ./bin/joblet-flow | grep -q "$EXPECTED_ARCH"; then
-    echo "❌ ./bin/joblet-flow is not $EXPECTED_ARCH but package arch is $ARCH"
-    echo "   Rebuild with: rm bin/joblet-flow && ./scripts/build-deb.sh $ARCH"
-    exit 1
+if [ -n "$EXPECTED_ARCH" ]; then
+    for b in joblet-flow flow-store; do
+        if ! file "./bin/$b" | grep -q "$EXPECTED_ARCH"; then
+            echo "❌ ./bin/$b is not $EXPECTED_ARCH but package arch is $ARCH"
+            echo "   Rebuild with: rm bin/joblet-flow bin/flow-store && ./scripts/build-deb.sh $ARCH"
+            exit 1
+        fi
+    done
 fi
 
 rm -rf "$BUILD_DIR"
@@ -37,8 +45,8 @@ mkdir -p "$BUILD_DIR/DEBIAN" \
     "$BUILD_DIR/opt/joblet-flow/bin" \
     "$BUILD_DIR/etc/systemd/system"
 
-cp ./bin/joblet-flow "$BUILD_DIR/opt/joblet-flow/bin/"
-chmod 755 "$BUILD_DIR/opt/joblet-flow/bin/joblet-flow"
+cp ./bin/joblet-flow ./bin/flow-store "$BUILD_DIR/opt/joblet-flow/bin/"
+chmod 755 "$BUILD_DIR/opt/joblet-flow/bin/joblet-flow" "$BUILD_DIR/opt/joblet-flow/bin/flow-store"
 cp ./scripts/joblet-flow.service "$BUILD_DIR/etc/systemd/system/"
 
 sed -e "s/VERSION_PLACEHOLDER/$VERSION/" -e "s/ARCH_PLACEHOLDER/$ARCH/" \

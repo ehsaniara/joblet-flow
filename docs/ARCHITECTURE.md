@@ -225,10 +225,33 @@ response surfaces as a gRPC error.
 ## State store
 
 All engine state sits behind a `Store` interface: workflow runs, task queues,
-and the activity/side-effect memo. The current implementation is **in-memory**
-(`memStore`) - state is lost on restart. A durable store (SQLite/Bolt) drops in
-behind the same interface with no engine changes; that is the main gap between
-the current skeleton and a production engine.
+and the activity/side-effect memo. The authoritative copy is **in-memory**
+(`memStore`), so reads and replay stay fast and never cross a process boundary.
+
+When `FLOW_STORE_SOCKET` is set, the engine wraps the store so every mutation is
+also **published** to a stdlib pub/sub and shipped, over a Unix socket
+(length-prefixed protobuf, an internal-only contract), to the **flow-store
+subprocess** the engine supervises. flow-store applies each event to a storage
+`Backend` (the shipped one is a stdlib append-only disk log at
+`/opt/joblet-flow/state`). This keeps flow-core's dependencies to the standard
+library and gRPC: any backend needing third-party libraries lives only in
+flow-store. Multiple subscribers can persist to multiple sinks at once, each at
+its own pace; a slow or absent sink never blocks the engine.
+
+```mermaid
+flowchart LR
+  eng["engine (flow-core)<br/>stdlib + grpc"]
+  mem["memStore<br/>authoritative, reads here"]
+  eng --> mem
+  mem -->|publish mutation| ps[["pub/sub"]]
+  ps -->|subscriber ships| sock(["Unix socket"])
+  sock --> fs["flow-store subprocess<br/>third-party deps isolated here"]
+  fs --> disk["append-only event log<br/>/opt/joblet-flow/state"]
+```
+
+Reads are served from memory, so a restart still loses in-flight state:
+**recovery** (replaying the event log to rebuild `memStore` on startup) is the
+next step, tracked in the [roadmap](#roadmap).
 
 ## Security
 
@@ -325,7 +348,10 @@ Toward a full durable-execution engine for agentic AI:
 2. ✅ **Signals into a running workflow** (`WaitSignal`) - human-in-the-loop.
 3. **Child workflows** - plan → sub-agents.
 4. **Continue-as-new / history bounding** - long-running agent loops.
-5. **Durable store** (SQLite/Bolt) behind `Store` - real durability & recovery.
+5. **Durable state** - done: mutations publish to a supervised flow-store
+   subprocess that persists an event log to disk (stdlib backend). Next:
+   recovery (replay the log into memStore on startup) and a third-party
+   backend (Bolt) proving the dependency isolation.
 6. **At-least-once delivery** - task lease + ack.
 7. **Runaway guardrails** - max-step / timeout for unbounded agent loops.
 8. **FlowService mTLS + authorization** - serve TLS with the ceremony-provisioned
